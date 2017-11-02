@@ -43,7 +43,8 @@ void usage()
 	       "\tvpn1: name of the peer interface of vpn0\n"
 	       "\tcon0: name of the first interface (closer to the vpn) that connects to the container\n"
 	       "\tcon1: name of the peer interface of con0\n"
-	       "\tcon2: name of the second interface (closer to the peer) that connects to the container\n\n",
+	       "\tcon2: name of the second interface (closer to the peer) that connects to the container\n"
+	       "\tcon3: name of the peer interface of con2\n",
 	       PROG_NAME);
 	exit(1);
 }
