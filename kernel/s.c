@@ -97,7 +97,6 @@ void steerer_user_kernel(struct sk_buff *skb)
 	payload += NETLINK_HEADER_LENGTH;
 	
 	nlh = (struct nlmsghdr *)skb->data;
-	printk(STEERER_ALERT "received netlink message type = %d\n", nlh->nlmsg_type);
 	
 	switch (nlh->nlmsg_type) {
 	case STEERER_NEW_EXP:
