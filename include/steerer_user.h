@@ -1,6 +1,6 @@
 /*
  *
- *	steerer: Packet Steerer for the PEERING testbed: steerer.h
+ *	steerer: Packet Steerer for the PEERING testbed: steerer_user.h
  *
  *	Author: Ronaldo A. Ferreira (raf@facom.ufms.br)
  *
