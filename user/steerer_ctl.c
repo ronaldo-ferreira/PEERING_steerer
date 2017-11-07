@@ -38,13 +38,10 @@
 
 void usage()
 {
-	printf("\nUsage: %s <vpn0> <vpn1> <con0> <con1> <con2> <con3>\n\n"
+	printf("\nUsage: %s <vpn0>  <con1> <con3>\n\n"
 	       "\tvpn0: name of the vpn interface in the current namespace\n"
-	       "\tvpn1: name of the peer interface of vpn0\n"
-	       "\tcon0: name of the first interface (closer to the vpn) that connects to the container\n"
-	       "\tcon1: name of the peer interface of con0\n"
-	       "\tcon2: name of the second interface (closer to the peer) that connects to the container\n"
-	       "\tcon3: name of the peer interface of con2\n",
+	       "\tcon1: name of the con1 interface in the container\n"
+	       "\tcon3: name of the con3 interface in the container\n",
 	       PROG_NAME);
 	exit(1);
 }
@@ -61,7 +58,7 @@ int main(int argc, char *argv[])
 {
 	int                sock;
 	
-	if (argc != 7)
+	if (argc != 4)
 		usage();
 	
 	sock = socket(PF_NETLINK, SOCK_RAW, STEERER_NETLINK_USER);
@@ -71,11 +68,11 @@ int main(int argc, char *argv[])
 	}
 	
 	strcpy(ifs.vpn0_name, argv[1]);
-	strcpy(ifs.vpn1_name, argv[2]);
-	strcpy(ifs.con0_name, argv[3]);
-	strcpy(ifs.con1_name, argv[4]);
-	strcpy(ifs.con2_name, argv[5]);
-	strcpy(ifs.con3_name, argv[6]);
+	//strcpy(ifs.vpn1_name, argv[2]);
+	//strcpy(ifs.con0_name, argv[3]);
+	strcpy(ifs.con1_name, argv[2]);
+	//strcpy(ifs.con2_name, argv[5]);
+	strcpy(ifs.con3_name, argv[3]);
 	
 	memset(&saddr, 0, sizeof(struct sockaddr_nl));
 	saddr.nl_family = AF_NETLINK;
