@@ -31,6 +31,11 @@
 #include <linux/rhashtable.h>
 #include <steerer.h>
 
+struct veth_priv {
+	struct net_device __rcu	*peer;
+	atomic64_t		dropped;
+};
+
 static struct nf_hook_ops netfilter_ops_in;  /* IP PRE ROUTING     */
 static struct nf_hook_ops netfilter_ops_out; /* NF_IP_POST_ROUTING */
 
@@ -219,6 +224,86 @@ void init_experiment(struct if_names *ifs)
 	mux_ns = con_ns = vpn_ns = 0;
 	rcu_read_lock();
 	for_each_net_rcu(netns) {
+		struct veth_priv *priv;
+		
+		if (!mux_ns) {
+			e->vpn0_dev = dev_get_by_name(netns, ifs->vpn0_name);
+			if (e->vpn0_dev) {
+				priv = netdev_priv(e->vpn0_dev);
+				e->vpn1_dev = rtnl_dereference(priv->peer);
+				mux_ns = 1;
+				if (con_ns)
+					break;
+			}
+		}
+		if (!con_ns) {
+			e->con1_dev = dev_get_by_name(netns, ifs->con1_name);
+			if (e->con1_dev) {
+				priv = netdev_priv(e->con1_dev);
+				e->con0_dev = rtnl_dereference(priv->peer);
+				e->con3_dev = dev_get_by_name(netns, ifs->con3_name);
+				priv = netdev_priv(e->con3_dev);
+				e->con2_dev = rtnl_dereference(priv->peer);
+				con_ns = 1;
+				if (mux_ns)
+					break;
+			}
+		}
+	};
+	rcu_read_unlock();
+	
+	if (!e->vpn0_dev || !e->vpn1_dev ||
+	    !e->con0_dev || !e->con1_dev ||
+	    !e->con2_dev || !e->con3_dev) {
+		printk(STEERER_ALERT
+		       "could not get all the devices (%s,%s,%s,%s,%s,%s)\n",
+		       ifs->vpn0_name, ifs->vpn1_name,
+		       ifs->con0_name, ifs->con1_name,
+		       ifs->con2_name, ifs->con3_name);
+		kfree(e);
+		return;
+	}
+
+	memcpy(&e->ifs, ifs, sizeof(struct if_names));
+	rhashtable_insert_fast(&vpn0_table, &e->vpn0_node, rhashtable_params_vpn0);
+	rhashtable_insert_fast(&con0_table, &e->con0_node, rhashtable_params_con0);
+	
+	printk(STEERER_ALERT
+	       "have just configured a new experiment with the devices: (%s,%s,%s,%s,%s,%s)\n",
+	       e->vpn0_dev->name, e->vpn1_dev->name,
+	       e->con0_dev->name, e->con1_dev->name,
+	       e->con2_dev->name, e->con3_dev->name);	
+	
+}
+/* init_experiment */
+
+
+/*********************************************************************
+ *
+ *	init_experiment: initializes one new experiment.
+ *
+ *********************************************************************/
+void init_experiment_old(struct if_names *ifs)
+{
+	struct net *netns;
+	int mux_ns, con_ns, vpn_ns;
+	struct experiment *e;
+
+	printk(STEERER_ALERT
+	       "configuring a new experiment with the devices: (%s,%s,%s,%s,%s,%s)\n",
+	       ifs->vpn0_name, ifs->vpn1_name,
+	       ifs->con0_name, ifs->con1_name,
+	       ifs->con2_name, ifs->con3_name);	
+	
+	e = kmalloc(sizeof(struct experiment), GFP_KERNEL);
+	if (!e) {
+		printk(STEERER_ALERT "could not allocate memory for the new experiment\n");
+		return;
+	}
+	
+	mux_ns = con_ns = vpn_ns = 0;
+	rcu_read_lock();
+	for_each_net_rcu(netns) {
 		if (!mux_ns) {
 			e->vpn0_dev = dev_get_by_name(netns, ifs->vpn0_name);
 			if (e->vpn0_dev) {
@@ -258,7 +343,7 @@ void init_experiment(struct if_names *ifs)
 	rhashtable_insert_fast(&vpn0_table, &e->vpn0_node, rhashtable_params_vpn0);
 	rhashtable_insert_fast(&con0_table, &e->con0_node, rhashtable_params_con0);
 }
-/* init_experiment */
+/* init_experiment_old */
 
 
 /*********************************************************************
