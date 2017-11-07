@@ -200,14 +200,33 @@ void steerer_init(void)
 
 /*********************************************************************
  *
+ *	steerer_dev_put: decrement the device reference counters.
+ *
+ *********************************************************************/
+void steerer_dev_put(struct experiment *e)
+{
+	if (e->vpn0_dev)
+		dev_put(e->vpn0_dev);
+	if (e->con1_dev)
+		dev_put(e->con1_dev);
+	if (e->con3_dev)
+		dev_put(e->con3_dev);
+}
+/* steerer_dev_put */
+
+
+/*********************************************************************
+ *
  *	init_experiment: initializes one new experiment.
  *
  *********************************************************************/
 void init_experiment(struct if_names *ifs)
 {
-	struct net *netns;
-	int mux_ns, con_ns, vpn_ns;
-	struct experiment *e;
+	int			mux_ns, con_ns;
+	struct net		*netns;
+	struct experiment	*e;
+	struct veth_priv	*priv;
+		
 
 	e = kmalloc(sizeof(struct experiment), GFP_KERNEL);
 	if (!e) {
@@ -215,17 +234,16 @@ void init_experiment(struct if_names *ifs)
 		return;
 	}
 	
-	mux_ns = con_ns = vpn_ns = 0;
+	mux_ns = con_ns = 0;
+	
 	rcu_read_lock();
 	for_each_net_rcu(netns) {
-		struct veth_priv *priv;
-		
 		if (!mux_ns) {
 			e->vpn0_dev = dev_get_by_name(netns, ifs->vpn0_name);
 			if (e->vpn0_dev) {
-				priv = netdev_priv(e->vpn0_dev);
-				//e->vpn1_dev = rtnl_dereference(priv->peer);
+				priv        = netdev_priv(e->vpn0_dev);
 				e->vpn1_dev = priv->peer;
+				
 				mux_ns = 1;
 				if (con_ns)
 					break;
@@ -234,13 +252,13 @@ void init_experiment(struct if_names *ifs)
 		if (!con_ns) {
 			e->con1_dev = dev_get_by_name(netns, ifs->con1_name);
 			if (e->con1_dev) {
-				priv = netdev_priv(e->con1_dev);
-				e->con0_dev =priv->peer;
-				//e->con0_dev = rtnl_dereference(priv->peer);
+				priv        = netdev_priv(e->con1_dev);
+				e->con0_dev = priv->peer;
+				
 				e->con3_dev = dev_get_by_name(netns, ifs->con3_name);
-				priv = netdev_priv(e->con3_dev);
+				priv        = netdev_priv(e->con3_dev);
 				e->con2_dev = priv->peer;
-				//e->con2_dev = rtnl_dereference(priv->peer);
+				
 				con_ns = 1;
 				if (mux_ns)
 					break;
@@ -248,6 +266,8 @@ void init_experiment(struct if_names *ifs)
 		}
 	};
 	rcu_read_unlock();
+
+	steerer_dev_put(e);
 	
 	if (!e->vpn0_dev || !e->vpn1_dev ||
 	    !e->con0_dev || !e->con1_dev ||
@@ -257,6 +277,7 @@ void init_experiment(struct if_names *ifs)
 		       ifs->vpn0_name, ifs->vpn1_name,
 		       ifs->con0_name, ifs->con1_name,
 		       ifs->con2_name, ifs->con3_name);
+
 		kfree(e);
 		return;
 	}
@@ -266,11 +287,10 @@ void init_experiment(struct if_names *ifs)
 	rhashtable_insert_fast(&con0_table, &e->con0_node, rhashtable_params_con0);
 	
 	printk(STEERER_ALERT
-	       "have just configured a new experiment with the devices: (%s,%s,%s,%s,%s,%s)\n",
+	       "has just configured a new experiment with the devices: (%s,%s,%s,%s,%s,%s)\n",
 	       e->vpn0_dev->name, e->vpn1_dev->name,
 	       e->con0_dev->name, e->con1_dev->name,
 	       e->con2_dev->name, e->con3_dev->name);	
-	
 }
 /* init_experiment */
 
