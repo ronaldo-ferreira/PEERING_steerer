@@ -224,7 +224,8 @@ void init_experiment(struct if_names *ifs)
 			e->vpn0_dev = dev_get_by_name(netns, ifs->vpn0_name);
 			if (e->vpn0_dev) {
 				priv = netdev_priv(e->vpn0_dev);
-				e->vpn1_dev = rtnl_dereference(priv->peer);
+				//e->vpn1_dev = rtnl_dereference(priv->peer);
+				e->vpn1_dev = priv->peer;
 				mux_ns = 1;
 				if (con_ns)
 					break;
@@ -234,10 +235,12 @@ void init_experiment(struct if_names *ifs)
 			e->con1_dev = dev_get_by_name(netns, ifs->con1_name);
 			if (e->con1_dev) {
 				priv = netdev_priv(e->con1_dev);
-				e->con0_dev = rtnl_dereference(priv->peer);
+				e->con0_dev =priv->peer;
+				//e->con0_dev = rtnl_dereference(priv->peer);
 				e->con3_dev = dev_get_by_name(netns, ifs->con3_name);
 				priv = netdev_priv(e->con3_dev);
-				e->con2_dev = rtnl_dereference(priv->peer);
+				e->con2_dev = priv->peer;
+				//e->con2_dev = rtnl_dereference(priv->peer);
 				con_ns = 1;
 				if (mux_ns)
 					break;
