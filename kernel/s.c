@@ -209,12 +209,6 @@ void init_experiment(struct if_names *ifs)
 	int mux_ns, con_ns, vpn_ns;
 	struct experiment *e;
 
-	printk(STEERER_ALERT
-	       "configuring a new experiment with the devices: (%s,%s,%s,%s,%s,%s)\n",
-	       ifs->vpn0_name, ifs->vpn1_name,
-	       ifs->con0_name, ifs->con1_name,
-	       ifs->con2_name, ifs->con3_name);	
-	
 	e = kmalloc(sizeof(struct experiment), GFP_KERNEL);
 	if (!e) {
 		printk(STEERER_ALERT "could not allocate memory for the new experiment\n");
