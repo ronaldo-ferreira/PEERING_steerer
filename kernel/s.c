@@ -139,7 +139,7 @@ static unsigned int steerer_in(void *priv,
 		skb->dev = e->vpn0_dev;
 		skb_push(skb, ETHER_HDR_LEN);
 		skb_reset_mac_header(skb);		
-		memcpy(eth_hdr(skb)->h_dest, e->vpn1_dev->dev_addr, ETHER_ADDR_LEN);
+		memcpy(eth_hdr(skb)->h_dest, e->vpn0_dev->dev_addr, ETHER_ADDR_LEN);
 		dev_queue_xmit(skb);
 		return NF_STOLEN;
 	}
@@ -173,6 +173,28 @@ static unsigned int steerer_out(void *priv,
 }
 /* steerer_out */
 
+
+void print_net_devices(void)
+{
+	struct net		*netns;
+	struct hlist_head	*head;
+	struct net_device	*dev;
+	struct veth_priv	*priv;
+	int			i;
+	
+	rcu_read_lock();
+	for_each_net_rcu(netns) {
+		for (i = 0; i < NETDEV_HASHENTRIES; i++) {
+			head = &netns->dev_name_head[i];
+			hlist_for_each_entry_rcu(dev, head, name_hlist) {
+			  priv = netdev_priv(dev);
+			  printk(STEERER_ALERT "dev=%s peer=%s ns#=%u\n", dev->name, priv->peer ? priv->peer->name : "NULL", netns->ns.inum);
+			};
+			  
+		}
+	};
+	rcu_read_unlock();
+}
 
 /*********************************************************************
  *
@@ -443,7 +465,8 @@ static __init int steerer_start(void)
 		steerer_cleanup();
 		return -1;
 	}
-	
+
+	print_net_devices();
 	printk(STEERER_ALERT "Packet Steerer initialized\n");
 	return 0;
 }
