@@ -29,6 +29,7 @@
 #include <linux/netfilter_ipv4.h>
 #include <linux/inetdevice.h>
 #include <linux/rhashtable.h>
+#include <linux/inet.h>
 #include <steerer.h>
 
 struct veth_priv {
@@ -41,20 +42,29 @@ static struct nf_hook_ops netfilter_ops_out; /* NF_IP_POST_ROUTING */
 
 struct sock *nl_sk = NULL;
 
-/* This  struct contains  the information  for an  experiment.  Device
-   pointers and names. */
-struct experiment {
-	struct rhash_head vpn0_node;
-	struct rhash_head con0_node;
+struct policy {
+	__u8	mac_tap1[ETHER_ADDR_LEN];
+	__be32	ip_block;
+	__be32	ip_mask;
+	
+	struct rhash_head con0_node;		// hash table entry
+	struct list_head  list;			// connect to the list of policies
 	
 	struct net_device *vpn0_dev;	
-	struct net_device *vpn1_dev;
 	struct net_device *con0_dev;	
 	struct net_device *con1_dev;	
 	struct net_device *con2_dev;	
 	struct net_device *con3_dev;
+
+};
+
+/* This  struct contains  the information  for an  experiment.  Device
+   pointers and names. */
+struct experiment {
+	struct rhash_head vpn0_node;
 	
-	struct if_names ifs;		// This is not necesssary. It is here for convenience only.
+	struct net_device *vpn0_dev;	
+	struct list_head  policies;
 };
 
 
@@ -75,8 +85,8 @@ const struct rhashtable_params rhashtable_params_vpn0 = {
 const struct rhashtable_params rhashtable_params_con0 = {
 	.nelem_hint	= 100,
 	.key_len	= sizeof(struct net_device *),
-	.key_offset	= offsetof(struct experiment, con0_dev),
-	.head_offset	= offsetof(struct experiment, con0_node),
+	.key_offset	= offsetof(struct policy, con0_dev),
+	.head_offset	= offsetof(struct policy, con0_node),
 	.min_size	= 50,
 	.nulls_base	= (1U << RHT_BASE_SHIFT),
 };
@@ -86,6 +96,7 @@ struct netlink_kernel_cfg nl_cfg = {
 	.groups = 0,
 	.input  = steerer_user_kernel
 };
+
 
 /*********************************************************************
  *
@@ -105,7 +116,7 @@ void steerer_user_kernel(struct sk_buff *skb)
 	
 	switch (nlh->nlmsg_type) {
 	case STEERER_NEW_EXP:
-		init_experiment((struct if_names *)payload);
+		init_experiment((struct conf_msg *)payload);
 		break;
 	}
 }
@@ -122,26 +133,49 @@ static unsigned int steerer_in(void *priv,
 			       const struct nf_hook_state *state)
 {
 	struct experiment *e;
-
+	struct policy	  *pol;
+	struct ethhdr	  *eth;
+	
 	e = rhashtable_lookup_fast(&vpn0_table, &skb->dev, rhashtable_params_vpn0);
 	if (e) {
 		// Received the packet from the interface vpn0 (VPN tunnel).
-		skb->dev   = e->con0_dev;
 		skb_push(skb, ETHER_HDR_LEN);
-		skb_reset_mac_header(skb);
-		memcpy(eth_hdr(skb)->h_dest, e->con1_dev->dev_addr, ETHER_ADDR_LEN);
-		dev_queue_xmit(skb);
-		return NF_STOLEN;
+		skb_reset_mac_header(skb);				
+		eth = eth_hdr(skb);
+		if (likely(ntohs(eth->h_proto) == ETH_P_IP)) {
+			struct iphdr *iph = ip_hdr(skb);
+			__be32 net_prefix;
+			
+			rcu_read_lock();
+			list_for_each_entry_rcu(pol, &e->policies, list) {
+				printk(STEERER_ALERT "received packet with MAC=" MAC_STR "MAC_TAP1=" MAC_STR "\n",
+				       MAC_TO_STR(eth->h_source), MAC_TO_STR(pol->mac_tap1));
+				net_prefix = iph->saddr & pol->ip_mask;
+				if (net_prefix == pol->ip_block) {
+					// Change the device to con0 and set the MAC Dest addr to con1
+					skb->dev   = pol->con0_dev;
+					memcpy(eth->h_dest, pol->con1_dev->dev_addr, ETHER_ADDR_LEN);
+					
+					dev_queue_xmit(skb);
+					
+					rcu_read_unlock();
+					return NF_STOLEN;
+				}
+			};
+			rcu_read_unlock();
+		}
 	}
-	e = rhashtable_lookup_fast(&con0_table, &skb->dev, rhashtable_params_con0);
-	if (e) {
-		// Received the packet from the interface con0 (container).
-		skb->dev = e->vpn0_dev;
-		skb_push(skb, ETHER_HDR_LEN);
-		skb_reset_mac_header(skb);		
-		memcpy(eth_hdr(skb)->h_dest, e->vpn0_dev->dev_addr, ETHER_ADDR_LEN);
-		dev_queue_xmit(skb);
-		return NF_STOLEN;
+	else {
+		pol = rhashtable_lookup_fast(&con0_table, &skb->dev, rhashtable_params_con0);
+		if (pol) {
+			// Received the packet from the interface con0 (container).			
+			skb->dev = pol->vpn0_dev;
+			skb_push(skb, ETHER_HDR_LEN);
+			skb_reset_mac_header(skb);		
+			memcpy(eth_hdr(skb)->h_dest, pol->mac_tap1, ETHER_ADDR_LEN);
+			dev_queue_xmit(skb);
+			return NF_STOLEN;
+		}
 	}
 	return NF_ACCEPT;
 }
@@ -158,22 +192,49 @@ static unsigned int steerer_out(void *priv,
 				const struct nf_hook_state *state)
 {
 	struct experiment *e;
-
+	struct policy	  *pol;
+	struct ethhdr	  *eth;
+	
 	e = rhashtable_lookup_fast(&vpn0_table, &skb->dev, rhashtable_params_vpn0);
 	if (e) {
-		skb->dev = e->con2_dev;
-		skb_push(skb, ETHER_HDR_LEN);
-		skb_reset_mac_header(skb);
-		memcpy(eth_hdr(skb)->h_dest, e->con3_dev->dev_addr, ETHER_ADDR_LEN); 
-		dev_queue_xmit(skb);
-		return NF_STOLEN;
-		
+		eth = eth_hdr(skb);
+		if (likely(ntohs(eth->h_proto) == ETH_P_IP)) {
+			struct iphdr *iph = ip_hdr(skb);
+			__be32 net_prefix;
+			
+			rcu_read_lock();
+			list_for_each_entry_rcu(pol, &e->policies, list) {
+				net_prefix = iph->daddr & pol->ip_mask;
+				if (net_prefix == pol->ip_block) {
+					// Change the packet device to con2 with DST MAC address of con3
+					skb->dev = pol->con2_dev;
+					
+					skb_push(skb, ETHER_HDR_LEN);
+					skb_reset_mac_header(skb);
+					
+					memcpy(eth_hdr(skb)->h_dest, pol->con3_dev->dev_addr, ETHER_ADDR_LEN);
+					
+					dev_queue_xmit(skb);
+					rcu_read_lock();				
+					return NF_STOLEN;
+				}
+			}
+			rcu_read_lock();
+		}
 	}
 	return NF_ACCEPT;
 }
 /* steerer_out */
 
 
+/*********************************************************************
+ *
+ *	print_net_devices: print  all the devices in  the system. This
+ *	function is for debugging only.
+ *
+ *	FIXME: Need to remove it once we're done.
+ *
+ *********************************************************************/
 void print_net_devices(void)
 {
 	struct net		*netns;
@@ -187,14 +248,18 @@ void print_net_devices(void)
 		for (i = 0; i < NETDEV_HASHENTRIES; i++) {
 			head = &netns->dev_name_head[i];
 			hlist_for_each_entry_rcu(dev, head, name_hlist) {
-			  priv = netdev_priv(dev);
-			  printk(STEERER_ALERT "dev=%s peer=%s ns#=%u\n", dev->name, priv->peer ? priv->peer->name : "NULL", netns->ns.inum);
+				priv = netdev_priv(dev);
+				printk(STEERER_ALERT "dev=%s peer=%s ns#=%u\n",
+				       dev->name, priv->peer ? priv->peer->name :
+				       "NULL", netns->ns.inum);
 			};
-			  
+			
 		}
 	};
 	rcu_read_unlock();
 }
+/* print_net_devices */
+
 
 /*********************************************************************
  *
@@ -225,14 +290,14 @@ void steerer_init(void)
  *	steerer_dev_put: decrement the device reference counters.
  *
  *********************************************************************/
-void steerer_dev_put(struct experiment *e)
+void steerer_dev_put(struct policy *pol)
 {
-	if (e->vpn0_dev)
-		dev_put(e->vpn0_dev);
-	if (e->con1_dev)
-		dev_put(e->con1_dev);
-	if (e->con3_dev)
-		dev_put(e->con3_dev);
+	if (pol->vpn0_dev)
+		dev_put(pol->vpn0_dev);
+	if (pol->con1_dev)
+		dev_put(pol->con1_dev);
+	if (pol->con3_dev)
+		dev_put(pol->con3_dev);
 }
 /* steerer_dev_put */
 
@@ -242,147 +307,118 @@ void steerer_dev_put(struct experiment *e)
  *	init_experiment: initializes one new experiment.
  *
  *********************************************************************/
-void init_experiment(struct if_names *ifs)
+int init_experiment(struct conf_msg *cm)
 {
-	int			mux_ns, con_ns;
 	struct net		*netns;
-	struct experiment	*e;
+	struct experiment	*e = NULL;
 	struct veth_priv	*priv;
-		
+	struct net_device	*dev;
+	struct policy		*pol = NULL;
 
-	e = kmalloc(sizeof(struct experiment), GFP_KERNEL);
-	if (!e) {
-		printk(STEERER_ALERT "could not allocate memory for the new experiment\n");
-		return;
-	}
-	
-	mux_ns = con_ns = 0;
+	printk(STEERER_ALERT
+	       "it will configure a new experiment with the devices: (%s,%s,%s) MAC=" MAC_STR "\n",
+	       cm->vpn0_name, cm->con1_name, cm->con3_name, MAC_TO_STR(cm->mac_tap1));
 	
 	rcu_read_lock();
 	for_each_net_rcu(netns) {
-		if (!mux_ns) {
-			e->vpn0_dev = dev_get_by_name(netns, ifs->vpn0_name);
-			if (e->vpn0_dev) {
-				priv        = netdev_priv(e->vpn0_dev);
-				e->vpn1_dev = priv->peer;
-				
-				mux_ns = 1;
-				if (con_ns)
-					break;
+		dev = dev_get_by_name(netns, cm->vpn0_name);
+		if (dev) {
+			e = rhashtable_lookup_fast(&vpn0_table, &dev, rhashtable_params_vpn0);
+			if (e == NULL) {
+				e = kmalloc(sizeof(struct experiment), GFP_KERNEL);
+				if (e == NULL)
+					goto err_nomem;
+				e->vpn0_dev = dev;
+				INIT_LIST_HEAD(&e->policies);
 			}
+			break;
 		}
-		if (!con_ns) {
-			e->con1_dev = dev_get_by_name(netns, ifs->con1_name);
-			if (e->con1_dev) {
-				priv        = netdev_priv(e->con1_dev);
-				e->con0_dev = priv->peer;
-				
-				e->con3_dev = dev_get_by_name(netns, ifs->con3_name);
-				priv        = netdev_priv(e->con3_dev);
-				e->con2_dev = priv->peer;
-				
-				con_ns = 1;
-				if (mux_ns)
-					break;
+	}
+
+	if (e == NULL)
+		goto err_noent;
+	
+	for_each_net_rcu(netns) {
+		dev = dev_get_by_name(netns, cm->con1_name);
+		if (dev) {
+			pol = kmalloc(sizeof(struct policy), GFP_KERNEL);
+			if (pol == NULL)
+				goto err_nomem;
+			
+			pol->vpn0_dev = e->vpn0_dev;
+			
+			pol->con1_dev = dev;
+			priv          = netdev_priv(pol->con1_dev);
+
+			// FIXME: Need to check if the interface is veth
+			if (priv == NULL)
+				printk(STEERER_ALERT "priv is NULL (1)\n");
+				       
+			pol->con0_dev = priv->peer;
+			
+			pol->con3_dev = dev_get_by_name(netns, cm->con3_name);
+			if (pol->con3_dev == NULL) {
+				printk(STEERER_ALERT "BUG: did not find con3 %s\n", cm->con3_name);
+				kfree(pol);
+				goto err_noent;
 			}
+			priv          = netdev_priv(pol->con3_dev);
+
+			// FIXME: Need to check if the interface is veth			
+			if (priv == NULL)
+				printk(STEERER_ALERT "priv is NULL (1)\n");
+				       			
+			pol->con2_dev = priv->peer;
+
+			memcpy(pol->mac_tap1, cm->mac_tap1, ETHER_ADDR_LEN);
+
+			pol->ip_block = in_aton(cm->ip_block);
+			pol->ip_mask  = in_aton(cm->ip_mask);
+			list_add_rcu(&pol->list, &e->policies);
+			break;
 		}
 	};
 	rcu_read_unlock();
 
-	steerer_dev_put(e);
+	if (pol == NULL)
+		goto err_noent;
 	
-	if (!e->vpn0_dev || !e->vpn1_dev ||
-	    !e->con0_dev || !e->con1_dev ||
-	    !e->con2_dev || !e->con3_dev) {
-		printk(STEERER_ALERT
-		       "could not get all the devices (%s,%s,%s,%s,%s,%s)\n",
-		       ifs->vpn0_name, ifs->vpn1_name,
-		       ifs->con0_name, ifs->con1_name,
-		       ifs->con2_name, ifs->con3_name);
-
-		kfree(e);
-		return;
+	steerer_dev_put(pol);
+	
+	if (!pol->vpn0_dev || !pol->con0_dev || !pol->con1_dev || !pol->con2_dev || !pol->con3_dev) {
+		printk(STEERER_ALERT "could not get all the devices (%s,%s,%s,%s,%s)\n",
+		       pol->vpn0_dev->name,
+		       pol->con0_dev->name, pol->con1_dev->name,
+		       pol->con2_dev->name, pol->con3_dev->name);
+		
+		kfree(pol);
+		return -ENOENT;
 	}
-
-	memcpy(&e->ifs, ifs, sizeof(struct if_names));
+	
 	rhashtable_insert_fast(&vpn0_table, &e->vpn0_node, rhashtable_params_vpn0);
-	rhashtable_insert_fast(&con0_table, &e->con0_node, rhashtable_params_con0);
+	rhashtable_insert_fast(&con0_table, &pol->con0_node, rhashtable_params_con0);
 	
 	printk(STEERER_ALERT
-	       "has just configured a new experiment with the devices: (%s,%s,%s,%s,%s,%s)\n",
-	       e->vpn0_dev->name, e->vpn1_dev->name,
-	       e->con0_dev->name, e->con1_dev->name,
-	       e->con2_dev->name, e->con3_dev->name);	
+	       "has just configured a new experiment with the devices: (%s,%s,%s,%s,%s)\n",
+	       pol->vpn0_dev->name,
+	       pol->con0_dev->name, pol->con1_dev->name,
+	       pol->con2_dev->name, pol->con3_dev->name);
+	
+	return 0;
+
+ err_noent:
+	rcu_read_unlock();
+	printk(STEERER_ALERT "at least one of the devices (%s,%s,%s) wast not found\n",
+	       cm->vpn0_name, cm->con1_name, cm->con1_name);
+	return -ENOENT;
+	
+ err_nomem:
+	
+	rcu_read_unlock();
+	printk(STEERER_ALERT "could not allocate memory for the new policy\n");
+	return -ENOMEM;
 }
 /* init_experiment */
-
-
-/*********************************************************************
- *
- *	init_experiment: initializes one new experiment.
- *
- *********************************************************************/
-void init_experiment_old(struct if_names *ifs)
-{
-	struct net *netns;
-	int mux_ns, con_ns, vpn_ns;
-	struct experiment *e;
-
-	printk(STEERER_ALERT
-	       "configuring a new experiment with the devices: (%s,%s,%s,%s,%s,%s)\n",
-	       ifs->vpn0_name, ifs->vpn1_name,
-	       ifs->con0_name, ifs->con1_name,
-	       ifs->con2_name, ifs->con3_name);	
-	
-	e = kmalloc(sizeof(struct experiment), GFP_KERNEL);
-	if (!e) {
-		printk(STEERER_ALERT "could not allocate memory for the new experiment\n");
-		return;
-	}
-	
-	mux_ns = con_ns = vpn_ns = 0;
-	rcu_read_lock();
-	for_each_net_rcu(netns) {
-		if (!mux_ns) {
-			e->vpn0_dev = dev_get_by_name(netns, ifs->vpn0_name);
-			if (e->vpn0_dev) {
-				e->con0_dev = dev_get_by_name(netns, ifs->con0_name);
-				e->con2_dev = dev_get_by_name(netns, ifs->con2_name);
-				mux_ns = 1;
-			}
-		}
-		if (!con_ns) {
-			e->con1_dev = dev_get_by_name(netns, ifs->con1_name);
-			if (e->con1_dev) {
-				e->con3_dev = dev_get_by_name(netns, ifs->con3_name);
-				con_ns = 1;
-			}
-		}
-		if (!vpn_ns) {
-			e->vpn1_dev = dev_get_by_name(netns, ifs->vpn1_name);
-			if (e->vpn1_dev)
-				vpn_ns = 1;
-		}
-	};
-	rcu_read_unlock();
-	
-	if (!e->vpn0_dev || !e->vpn1_dev ||
-	    !e->con0_dev || !e->con1_dev ||
-	    !e->con2_dev || !e->con3_dev) {
-		printk(STEERER_ALERT
-		       "could not get all the devices (%s,%s,%s,%s,%s,%s)\n",
-		       ifs->vpn0_name, ifs->vpn1_name,
-		       ifs->con0_name, ifs->con1_name,
-		       ifs->con2_name, ifs->con3_name);
-		kfree(e);
-		return;
-	}
-
-	memcpy(&e->ifs, ifs, sizeof(struct if_names));
-	rhashtable_insert_fast(&vpn0_table, &e->vpn0_node, rhashtable_params_vpn0);
-	rhashtable_insert_fast(&con0_table, &e->con0_node, rhashtable_params_con0);
-}
-/* init_experiment_old */
 
 
 /*********************************************************************
@@ -394,14 +430,11 @@ void init_experiment_old(struct if_names *ifs)
 void steerer_free_entry(void *ptr, void *arg)
 {
 	if (ptr) {
-		struct experiment *e = (struct experiment *)ptr;
-		
-		printk(STEERER_ALERT "freeing entry for device %s\n",
-		       e->ifs.vpn0_name);
+		printk(STEERER_ALERT "freeing a policy or an experiment entry\n");
 		kfree(ptr);
 	}
 	else
-		printk(STEERER_ALERT "BUG: trying to free a NULL pointer to an experiment\n");
+		printk(STEERER_ALERT "BUG: trying to free a NULL pointer to a policy or an experiment\n");
 }
 /* steerer_free_entry */
 
@@ -436,7 +469,6 @@ static __exit void steerer_exit(void)
 	printk(STEERER_ALERT "Packet Steerer removed\n");
 }
 /* steerer_exit */
-
 
 
 /*********************************************************************

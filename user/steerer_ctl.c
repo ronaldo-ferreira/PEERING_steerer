@@ -38,10 +38,13 @@
 
 void usage()
 {
-	printf("\nUsage: %s <vpn0>  <con1> <con3>\n\n"
+	printf("\nUsage: %s <vpn0> <con1> <con3> <ip_block> <ip_mask> <mac_tap1>\n\n"
 	       "\tvpn0: name of the vpn interface in the current namespace\n"
 	       "\tcon1: name of the con1 interface in the container\n"
-	       "\tcon3: name of the con3 interface in the container\n",
+	       "\tcon3: name of the con3 interface in the container\n"
+	       "\tip_block: block of IP addresses assigned to the client\n"
+	       "\tip_mask: mask of the IP block\n"
+	       "\tmac_tap1: MAC address of the tap1 interface on the client vpn\n",
 	       PROG_NAME);
 	exit(1);
 }
@@ -49,16 +52,25 @@ void usage()
 #define MSG_LENGTH 1024	/* Maximum message length */
 
 struct sockaddr_nl saddr, daddr;
-struct if_names	   ifs;
+struct conf_msg	   cm;
 struct nlmsghdr    *nlh;
 struct iovec       iov;
 struct msghdr      msg;
+
+void str_eth(char *str, unsigned char *mac)
+{
+	unsigned int tmp[6], i;
+	
+	sscanf(str, "%x:%x:%x:%x:%x:%x", &tmp[0], &tmp[1], &tmp[2], &tmp[3], &tmp[4], &tmp[5]);
+	for(i = 0; i < ETHER_ADDR_LEN; i++)
+		mac[i] = (unsigned char)tmp[i];	
+}
 
 int main(int argc, char *argv[])
 {
 	int                sock;
 	
-	if (argc != 4)
+	if (argc != 7)
 		usage();
 	
 	sock = socket(PF_NETLINK, SOCK_RAW, STEERER_NETLINK_USER);
@@ -66,14 +78,15 @@ int main(int argc, char *argv[])
 		perror("Error opening the netlink socket");
 		return -1;
 	}
-	
-	strcpy(ifs.vpn0_name, argv[1]);
-	//strcpy(ifs.vpn1_name, argv[2]);
-	//strcpy(ifs.con0_name, argv[3]);
-	strcpy(ifs.con1_name, argv[2]);
-	//strcpy(ifs.con2_name, argv[5]);
-	strcpy(ifs.con3_name, argv[3]);
-	
+
+	// FIXME: validate the input. Strings should be shorter than the allocated space in the struct
+	strcpy(cm.vpn0_name, argv[1]);
+	strcpy(cm.con1_name, argv[2]);
+	strcpy(cm.con3_name, argv[3]);
+	strcpy(cm.ip_block, argv[4]);
+	strcpy(cm.ip_mask, argv[5]);
+	str_eth(argv[6], cm.mac_tap1);
+
 	memset(&saddr, 0, sizeof(struct sockaddr_nl));
 	saddr.nl_family = AF_NETLINK;
 	saddr.nl_pid    = getpid();
@@ -92,7 +105,7 @@ int main(int argc, char *argv[])
 	nlh->nlmsg_flags = 0;
 	nlh->nlmsg_type  = STEERER_NEW_EXP;
 	
-	memcpy(NLMSG_DATA(nlh), &ifs, sizeof(struct if_names));
+	memcpy(NLMSG_DATA(nlh), &cm, sizeof(struct conf_msg));
 
 	iov.iov_base = (void *)nlh;
 	iov.iov_len  = nlh->nlmsg_len;

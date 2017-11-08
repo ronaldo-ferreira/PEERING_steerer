@@ -24,7 +24,10 @@
  *
  */
 
+#define ETHER_ADDR_LEN	6
+
 #define MAX_NAME_LEN	30
+#define MAX_IP_LEN	16
 
 #define STEERER_ALERT	"Steerer: "
 
@@ -33,11 +36,13 @@
 
 #define STEERER_NEW_EXP	1
 
-struct if_names {
+struct conf_msg {
 	char vpn0_name[MAX_NAME_LEN];
-	char vpn1_name[MAX_NAME_LEN];
-	char con0_name[MAX_NAME_LEN];
 	char con1_name[MAX_NAME_LEN];
-	char con2_name[MAX_NAME_LEN];
 	char con3_name[MAX_NAME_LEN];
+
+	char ip_block[MAX_IP_LEN];
+	char ip_mask[MAX_IP_LEN];
+	
+	unsigned char mac_tap1[ETHER_ADDR_LEN];
 };

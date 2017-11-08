@@ -28,6 +28,7 @@
 #define ETHER_ADDR_LEN	6
 
 #define MAX_NAME_LEN	30
+#define MAX_IP_LEN	16
 
 #define STEERER_ALERT	"Steerer: "
 
@@ -36,15 +37,27 @@
 
 #define STEERER_NEW_EXP	1
 
-struct if_names {
+struct conf_msg {
 	char vpn0_name[MAX_NAME_LEN];
-	char vpn1_name[MAX_NAME_LEN];
-	char con0_name[MAX_NAME_LEN];
 	char con1_name[MAX_NAME_LEN];
-	char con2_name[MAX_NAME_LEN];
 	char con3_name[MAX_NAME_LEN];
+	
+	char ip_block[MAX_IP_LEN];
+	char ip_mask[MAX_IP_LEN];
+	
+	__u8 mac_tap1[ETHER_ADDR_LEN];
 };
 
-
 void steerer_user_kernel(struct sk_buff *skb);
-void init_experiment(struct if_names *ifs);
+int init_experiment(struct conf_msg *cm);
+
+#ifdef __BIG_ENDIAN
+#define IP_TO_STR(ip) (((ip) >> 24)), (((ip) >> 16) & 0xFF), (((ip) >> 8) & 0xFF), ((ip) & 0xFF)
+#else
+#define IP_TO_STR(ip) ((ip) & 0xFF), (((ip) >> 8) & 0xFF), (((ip) >> 16) & 0xFF), (((ip) >> 24))
+#endif
+
+#define IP_STR	"%d.%d.%d.%d "
+#define MAC_STR	"%02X:%02X:%02X:%02X:%02X:%02X "
+#define MAC_TO_STR(m) m[0], m[1], m[2], m[3], m[4], m[5]
+
