@@ -86,8 +86,8 @@ def run(container_name, iface_prefix):
     Popen("docker exec -it %s ip rule add to %s table %s priority %s" % (mux_name, "184.164.224.0/24", "6000", 800), shell=True).wait()
 
     # Add default routes to the tables 5000 and 6000 to send packets to the containers.
-    Popen("docker exec -it %s ip route add default via %s table %s" % (mux_name, "10.60.0.11", 5000), shell=True).wait()    
-    Popen("docker exec -it %s ip route add default via %s table %s" % (mux_name, "10.70.0.23", 6000), shell=True).wait()
+    Popen("docker exec -it %s ip route add default via %s table %s" % (mux_name, "10.60.0.11", "5000"), shell=True).wait()    
+    Popen("docker exec -it %s ip route add default via %s table %s" % (mux_name, "10.70.0.23", "6000"), shell=True).wait()
     
     
 def main(argv):
