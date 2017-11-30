@@ -11,4 +11,6 @@ MAINTAINER Brivaldo Junior <brivaldo@facom.ufms.br>
 # Install utilities
 RUN apt-get update && apt-get install -y tcpdump traceroute
 
-RUN echo 1 > /proc/sys/net/ipv4/ip_forward
+ADD sysctl.conf .
+
+

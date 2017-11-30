@@ -1,0 +1,90 @@
+{
+    "host_interfaces": [
+        {
+            "create_in_ctr": true, 
+            "id": 1, 
+            "inet_addr_ipv4": "10.100.0.100/24", 
+            "inet_addr_ipv6": null, 
+            "is_bgp_if": true, 
+            "mac_addr": null, 
+            "mux": "testmuxctr", 
+            "name": "eth0", 
+            "use_dhcp": false
+        }, 
+        {
+            "create_in_ctr": true, 
+            "id": 2, 
+            "inet_addr_ipv4": "10.254.254.1/24", 
+            "inet_addr_ipv6": null, 
+            "is_bgp_if": true, 
+            "mac_addr": null, 
+            "mux": "testmuxctr", 
+            "name": "eth0.10", 
+            "use_dhcp": false
+        }
+    ], 
+    "ip_rules": {
+        "downstream": [
+            {
+                "iifname": "host_eth0", 
+                "priority": 20000, 
+                "table": 20000
+            }, 
+            {
+                "iifname": "host_eth0.10", 
+                "priority": 20000, 
+                "table": 20000
+            }
+        ], 
+        "upstream": [
+            {
+                "iifname": "upstream1", 
+                "priority": 10001, 
+                "table": 10001
+            }, 
+            {
+                "iifname": "upstream2", 
+                "priority": 10002, 
+                "table": 10002
+            }, 
+            {
+                "iifname": "upstream5", 
+                "priority": 10005, 
+                "table": 10005
+            }, 
+            {
+                "iifname": "upstream4", 
+                "priority": 10004, 
+                "table": 10004
+            }
+        ]
+    }, 
+    "tap_interfaces": [
+        {
+            "inet_addr_ipv4": "100.65.128.1/16", 
+            "name": "tap0"
+        }
+    ], 
+    "virt_upstream_interfaces": [
+        {
+            "inet_addr_ipv4": "100.65.0.1/16", 
+            "name": "upstream1", 
+            "parent_name": "tap0"
+        }, 
+        {
+            "inet_addr_ipv4": "100.65.0.2/16", 
+            "name": "upstream2", 
+            "parent_name": "tap0"
+        }, 
+        {
+            "inet_addr_ipv4": "100.65.0.5/16", 
+            "name": "upstream5", 
+            "parent_name": "tap0"
+        }, 
+        {
+            "inet_addr_ipv4": "100.65.0.4/16", 
+            "name": "upstream4", 
+            "parent_name": "tap0"
+        }
+    ]
+}
