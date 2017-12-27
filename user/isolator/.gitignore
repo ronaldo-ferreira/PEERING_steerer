@@ -1,5 +1,5 @@
-isolator/bin/
-isolator/include/
-isolator/lib/
-isolator/local/
-isolator/pip-selfcheck.json
+bin/
+include/
+lib/
+local/
+pip-selfcheck.json
