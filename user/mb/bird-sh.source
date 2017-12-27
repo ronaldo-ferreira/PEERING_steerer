@@ -1,0 +1,132 @@
+# function to display commands as executed
+exe() { echo "\$ $@" ; "$@" ; }
+
+# cleanup temp files on exit
+trap 'rm -rf $TMP_CONFIG_DIR $TMP_MD5_PATH' EXIT
+
+call_bird ()
+{ 
+  if [ "$BIRD_IPV6" = true ]; then 
+    CMD="bird6" 
+  else 
+    CMD="bird" 
+  fi
+
+  # set the control socket
+  if [ -n "$BIRD_CONTROL_SOCKET" ]; then 
+    CMD="$CMD -s $BIRD_CONTROL_SOCKET"
+  fi
+
+  # add anything that was passed in
+  CMD="$CMD $@"
+  exe $CMD
+}
+
+call_birdc ()
+{ 
+  if [ "$BIRD_IPV6" = true ]; then 
+    CMD="birdc6" 
+  else 
+    CMD="birdc" 
+  fi
+
+  # set the control socket
+  if [ -n "$BIRD_CONTROL_SOCKET" ]; then 
+    CMD="$CMD -s $BIRD_CONTROL_SOCKET"
+  fi
+  
+  # add anything that was passed in
+  CMD="$CMD $@"
+  exe $CMD
+}
+
+check_manageable_or_die ()
+{
+  if [ -z "$BIRD_CONFIG_PATH" ]; then
+    echo "BIRD_CONFIG_PATH must be set for config to be managed"
+    exit 1
+  fi
+}
+
+start_bird ()
+{
+  if [ -n "$BIRD_CONTROL_SOCKET" ]; then 
+    mkdir -p $(dirname $BIRD_CONTROL_SOCKET)
+  fi
+
+  if [ -n "$BIRD_VPN_CLIENT_CFG_DIR" ]; then 
+    mkdir -p $BIRD_VPN_CLIENT_CFG_DIR
+  fi
+
+  if [ -n "$BIRD_MANAGED_CONFIG_DIR" ]; then
+    check_manageable_or_die
+    rm -rf $BIRD_MANAGED_CONFIG_DIR
+    mkdir -p $BIRD_MANAGED_CONFIG_DIR    
+    BIRD_CONFIG_DIR=$(dirname $BIRD_CONFIG_PATH)
+    BIRD_CONFIG_FILE=$(basename $BIRD_CONFIG_PATH)
+
+    echo "Copying configs from $BIRD_CONFIG_DIR to $BIRD_MANAGED_CONFIG_DIR"
+    exe rsync -a --delete-after --delay-updates $BIRD_CONFIG_DIR/. $BIRD_MANAGED_CONFIG_DIR
+    CONFIG_ARGS="-c $BIRD_MANAGED_CONFIG_DIR/$BIRD_CONFIG_FILE"
+  
+  elif [ -n "$BIRD_CONFIG_PATH" ]; then
+    CONFIG_ARGS="-c $BIRD_CONFIG_PATH"
+  fi
+  
+  echo "Starting BIRD"
+  call_bird "-f" $CONFIG_ARGS $@
+}
+
+reload_bird ()
+{
+  if [ -n "$BIRD_MANAGED_CONFIG_DIR" ]; then
+    check_manageable_or_die
+    TMP_CONFIG_DIR=`mktemp -d`
+    BIRD_CONFIG_DIR=$(dirname $BIRD_CONFIG_PATH)
+    echo "Building temporary directory with candidate configs"
+    exe cp -a $BIRD_CONFIG_DIR/. $TMP_CONFIG_DIR
+  fi
+
+  ARGS="-p"
+  if [ -n "$BIRD_CONFIG_PATH" ]; then
+    if [ -n "$BIRD_MANAGED_CONFIG_DIR" ]; then
+      BIRD_CONFIG_FILE=$(basename $BIRD_CONFIG_PATH)
+      ARGS="$ARGS -c $TMP_CONFIG_DIR/$BIRD_CONFIG_FILE"
+    else 
+      ARGS="$ARGS -c $BIRD_CONFIG_PATH"
+    fi
+  fi
+
+  echo "Checking if candidate BIRD configuration is valid"
+  call_bird "$ARGS"
+
+  if [ -n "$BIRD_MANAGED_CONFIG_DIR" ]; then
+    echo "Copying configs from $TMP_CONFIG_DIR to $BIRD_MANAGED_CONFIG_DIR"
+    exe rsync -a --delete-after --delay-updates $TMP_CONFIG_DIR/. $BIRD_MANAGED_CONFIG_DIR
+  fi
+
+  echo "Reloading BIRD"
+  call_birdc "configure" $@
+  
+  echo "Finished reloading BIRD"
+}
+
+check_config ()
+{
+  check_manageable_or_die
+  BIRD_CONFIG_DIR=$(dirname $BIRD_CONFIG_PATH) 
+  TMP_MD5_PATH=$(mktemp)
+  md5deep -r $BIRD_CONFIG_DIR &> "$TMP_MD5_PATH"
+
+  RET=0
+  md5deep -r -X $TMP_MD5_PATH $BIRD_MANAGED_CONFIG_DIR || RET=$?
+  if [ "$RET" -ge 1 -a "$RET" -le 3  ]; then
+    echo "New configuration available"
+    return 255
+  elif [ "$RET" -eq 0 ]; then
+    echo "No configuration changes detected"
+  else 
+    echo "Error during configuration comparison"
+  fi
+  return $RET
+}

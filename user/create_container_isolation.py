@@ -28,7 +28,7 @@ def mb_config(container_name, iface_prefix, ip_prefix, con0_ip, con1_ip, con2_ip
 
     time.sleep(5)
 
-    Popen("docker create --privileged --net=none -t -i --cap-add=ALL --name %s mb_base:latest" % container_name, shell=True).wait()
+    Popen("docker create --net=none -t -i --cap-add=ALL --name %s peering_container:latest" % container_name, shell=True).wait()
     Popen("docker container start %s" % container_name, shell=True).wait()
 
     # The line below is no longer needed. Now the two container interfaces are in separte layer-two domains
@@ -64,27 +64,27 @@ def mb_config(container_name, iface_prefix, ip_prefix, con0_ip, con1_ip, con2_ip
     con3 = iface_prefix + "3"
 
     # Create a veth interface that works as a pipe between the containers and the upstream interfaces
-    Popen("ip netns exec %s ip link add veth-raf0 type veth peer name veth-raf1" % ns_mux, shell=True).wait()
+    Popen("ip netns exec %s ip link add veth-ctr0 type veth peer name veth-ctr1" % ns_mux, shell=True).wait()
 
     # Add the container interface facing the client
     Popen("ip netns exec %s ip link add %s link tap0 type macvlan" % (ns_mux, con1), shell=True).wait()
 
     # Add the container interface facing the upstream peers.
-    Popen("ip netns exec %s ip link add %s link veth-raf1 type macvlan" % (ns_mux, con3), shell=True).wait()
+    Popen("ip netns exec %s ip link add %s link veth-ctr1 type macvlan" % (ns_mux, con3), shell=True).wait()
 
-    # Add the IP address to the veth-raf0 interface and up the veth interfaces
-    Popen("ip netns exec %s ip addr add %s/24 dev veth-raf0" % (ns_mux, con2_ip), shell=True).wait()
-    Popen("ip netns exec %s ip link set veth-raf0 up" % ns_mux, shell=True).wait()
-    Popen("ip netns exec %s ip link set veth-raf1 up" % ns_mux, shell=True).wait()
+    # Add the IP address to the veth-ctr0 interface and up the veth interfaces
+    Popen("ip netns exec %s ip addr add %s/24 dev veth-ctr0" % (ns_mux, con2_ip), shell=True).wait()
+    Popen("ip netns exec %s ip link set veth-ctr0 up" % ns_mux, shell=True).wait()
+    Popen("ip netns exec %s ip link set veth-ctr1 up" % ns_mux, shell=True).wait()
 
     # The interfaces below should be configured from a file (interface-container.json, for example). We should
     # reuse the interface.py code. The IP addresses are the same as the ones in the file interface.json, but
     # we rewrite the third octect from 0 to 192.
-    Popen("ip netns exec %s ip link add upstream1b link veth-raf0 type macvlan" % ns_mux, shell=True).wait() 
-    Popen("ip netns exec %s ip link add upstream2b link veth-raf0 type macvlan" % ns_mux, shell=True).wait() 
-    Popen("ip netns exec %s ip link add upstream4b link veth-raf0 type macvlan" % ns_mux, shell=True).wait() 
-    Popen("ip netns exec %s ip link add upstream5b link veth-raf0 type macvlan" % ns_mux, shell=True).wait()
-    Popen("ip netns exec %s ip link add upstream6b link veth-raf0 type macvlan" % ns_mux, shell=True).wait()
+    Popen("ip netns exec %s ip link add upstream1b link veth-ctr0 type macvlan" % ns_mux, shell=True).wait() 
+    Popen("ip netns exec %s ip link add upstream2b link veth-ctr0 type macvlan" % ns_mux, shell=True).wait() 
+    Popen("ip netns exec %s ip link add upstream4b link veth-ctr0 type macvlan" % ns_mux, shell=True).wait() 
+    Popen("ip netns exec %s ip link add upstream5b link veth-ctr0 type macvlan" % ns_mux, shell=True).wait()
+    Popen("ip netns exec %s ip link add upstream6b link veth-ctr0 type macvlan" % ns_mux, shell=True).wait()
 
     Popen("ip netns exec %s ip addr add 100.65.192.1/24 dev upstream1b" % ns_mux, shell=True).wait()
     Popen("ip netns exec %s ip addr add 100.65.192.2/24 dev upstream2b" % ns_mux, shell=True).wait()
@@ -99,12 +99,12 @@ def mb_config(container_name, iface_prefix, ip_prefix, con0_ip, con1_ip, con2_ip
     Popen("ip netns exec %s ip link set upstream2b up" % ns_mux, shell=True).wait()
     Popen("ip netns exec %s ip link set upstream4b up" % ns_mux, shell=True).wait()
     Popen("ip netns exec %s ip link set upstream5b up" % ns_mux, shell=True).wait()
-    Popen("ip netns exec %s ip addr set upstream6b up" % ns_mux, shell=True).wait()
+    Popen("ip netns exec %s ip link set upstream6b up" % ns_mux, shell=True).wait()
     
     
     # Add rules to lookup the upstream tables for packets coming from the container enroute to upstream.
     # These rules should be configured from the information in the database.
-    Popen("ip netns exec %s ip rule add iif veth-raf0 table 10000 priority 10000" % ns_mux, shell=True).wait()
+    Popen("ip netns exec %s ip rule add iif veth-ctr0 table 10000 priority 10000" % ns_mux, shell=True).wait()
     Popen("ip netns exec %s ip rule add iif upstream1b table 10001 priority 10001" % ns_mux, shell=True).wait()
     Popen("ip netns exec %s ip rule add iif upstream2b table 10002 priority 10002" % ns_mux, shell=True).wait()
     Popen("ip netns exec %s ip rule add iif upstream4b table 10004 priority 10004" % ns_mux, shell=True).wait()
@@ -123,10 +123,11 @@ def mb_config(container_name, iface_prefix, ip_prefix, con0_ip, con1_ip, con2_ip
     # Configure routes
     Popen("docker exec -it %s ip route add %s via %s" % (container_name, ip_prefix, con0_ip), shell=True).wait()
 
-    # The default route below should commented out if we configure an iBGP session between the client and
+    # The default route below should be commented out if we configure an iBGP session between the client and
     # the container.
-    Popen("docker exec -it %s ip route add default via %s" % (container_name, con2_ip), shell=True).wait()
-    
+    # Popen("docker exec -it %s ip route add default via %s" % (container_name, con2_ip), shell=True).wait()
+
+    Popen("docker exec -it %s ip rule add table 151 priority 1510" % container_name, shell=True).wait()
 
 def main(argv):
     parser = argparse.ArgumentParser(description='Create Docker Container with named interfaces for steering.')
