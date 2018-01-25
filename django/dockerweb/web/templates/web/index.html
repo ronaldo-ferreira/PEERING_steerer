@@ -1,0 +1,12 @@
+<form action="#" method="post">{% csrf_token %}
+ <input type="text" value="{{ statusDocker }}" disabled="disabled" readonly="readonly" name="statusBox" size="10" "/>
+ <input type="submit" value="RUN" name="runContainer">
+ <input type="submit" value="STOP" name="stopContainer">
+</form>
+
+Result action:
+<form action="#" method="post">{% csrf_token %}
+ <textarea rows=20 cols=130 disabled="disabled" readonly="readonly" name="sshBox" "/>
+ {{ statusSSH }}
+ </textarea>
+</form>
