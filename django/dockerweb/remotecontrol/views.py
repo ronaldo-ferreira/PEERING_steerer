@@ -2,8 +2,7 @@ from django.http import HttpResponseRedirect
 from django.shortcuts import render
 from dockerweb.remotecontrol.forms import ServerForm
 from docker import from_env
-from dockerweb.remotecontrol.utils import set_mux_server
-
+from dockerweb.remotecontrol.utils import set_mux_server, get_mux_env
 
 #TODO: move this to the Django database
 mux_servers = {}
@@ -22,9 +21,11 @@ def homeproject(request):
 
             # Received the Mux Server Option
             context['remoteserver'] = mux_servers[form.cleaned_data['remoteserver']][3]   # Remote Server Name, third position
-
             set_mux_server(form.cleaned_data['remoteserver'], mux_servers)
+
+            #TODO: failing to connect to some servers
             client = from_env()
+
             context['dockerlist'] = client.images.list()
 
             return render(request, 'connected.html', context)
