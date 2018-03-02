@@ -1,0 +1,11 @@
+<h1>Select the remote server</h1>
+
+<form action="." method="post">
+    {% csrf_token %}
+    <p>
+        <label for="{{ form.remoteserver.id_for_remoteserver }}">{{ form.remoteserver.label }}</label>
+        {{ form.remoteserver }}
+    </p>
+
+    <input type="submit" value="Connect!" />
+</form>
